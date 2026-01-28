@@ -403,19 +403,20 @@ function handleDisconnect(socket: Socket): void {
     if (result) {
         const { table, guest } = result;
 
-        // Notificar a otros comensales (opcional, para UI "offline")
-        // No emitimos TABLE_GUEST_LEFT para que no desaparezca de la lista
+        // Notificar a otros comensales que el usuario se fue (eliminado)
+        io.to(table.id).emit(ServerEvents.TABLE_GUEST_LEFT, {
+            guestId: guest.id,
+            displayName: guest.displayName,
+            guestCount: table.guests.length
+        });
 
-        // Enviar estado actualizado (para que se marque como offline si la UI lo soporta)
+        // Enviar estado actualizado
         const updatedTable = tableService.getTable(table.id);
         if (updatedTable) {
-            // Verificar si los que quedan online ya pagaron todos
-            // TODO: Importar lógica de verificación de pagos si se desea auto-completar
-
             io.to(table.id).emit(ServerEvents.TABLE_STATE, tableService.tableToDTO(updatedTable));
         }
 
-        console.log(`[Socket] ${guest.displayName} set to offline in table ${table.id}`);
+        console.log(`[Socket] ${guest.displayName} removed from table ${table.id}`);
     }
 
     console.log(`[Socket] Client disconnected: ${socket.id}`);

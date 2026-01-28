@@ -204,14 +204,20 @@ export function handleGuestDisconnect(socketId: string): { table: Table; guest: 
     const guest = table.guests.find(g => g.id === guestId);
     if (!guest) return null;
 
-    // Marcar como desconectado pero NO eliminar
-    guest.isOnline = false;
+    // Modificación solicitada: Eliminar el guest completamente al desconectar
+    const guestIndex = table.guests.findIndex(g => g.id === guestId);
+    if (guestIndex > -1) {
+        table.guests.splice(guestIndex, 1);
+    }
 
-    // Limpiar mappings de socket (el usuario necesitará nuevo socket ID al volver)
+    // Recalcular totales tras la salida
+    recalculateTableTotals(table);
+
+    // Limpiar mappings de socket
     socketToTable.delete(socketId);
     socketToGuest.delete(socketId);
 
-    console.log(`[TableService] Guest ${guest.displayName} disconnected (offline) from table ${tableId}`);
+    console.log(`[TableService] Guest ${guest.displayName} removed from table ${tableId}`);
 
     return { table, guest };
 }
@@ -245,6 +251,8 @@ export function resetTable(tableId: string): Table | null {
         g.selectedItemIds = [];
         g.paymentAmount = 0;
         g.paymentStatus = 'pending';
+        // REGENERATE ITEMS for a complete fresh start feel
+        g.items = generateGuestItems();
         delete g.paymentDetails;
     });
 
