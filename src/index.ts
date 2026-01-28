@@ -21,7 +21,7 @@ const httpServer = createServer(app);
 // Middleware
 app.use(cors({
     origin: config.corsOrigins,
-    credentials: true
+    credentials: false
 }));
 
 app.use(express.json());

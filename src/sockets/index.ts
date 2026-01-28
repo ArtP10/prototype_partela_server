@@ -25,7 +25,7 @@ export function initializeSocket(httpServer: HttpServer): Server {
         cors: {
             origin: config.corsOrigins,
             methods: ['GET', 'POST'],
-            credentials: true
+            credentials: false
         },
         pingTimeout: 60000,
         pingInterval: 25000
