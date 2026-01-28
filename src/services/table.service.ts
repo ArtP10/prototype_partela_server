@@ -237,7 +237,9 @@ export function resetTable(tableId: string): Table | null {
     table.itemAssignments = {};
     table.allItemsAssigned = false;
 
-    // Resetear guests (sin eliminarlos)
+    // Resetear guests: Eliminar offline, resetear online
+    table.guests = table.guests.filter(g => g.isOnline);
+
     table.guests.forEach(g => {
         g.votedPaymentMode = null;
         g.selectedItemIds = [];
