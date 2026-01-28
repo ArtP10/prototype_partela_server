@@ -33,6 +33,10 @@ export function submitPayment(
     // Guardar información de pago
     guest.paymentDetails = paymentInfo;
     guest.paymentStatus = 'submitted';
+    // CRITICAL FIX: Ensure payment amount is set if passed, or keep existing
+    if (paymentInfo.amount) {
+        guest.paymentAmount = paymentInfo.amount;
+    }
 
     // Simular procesamiento (en producción aquí iría la integración real)
     // Por ahora, marcamos como confirmado inmediatamente

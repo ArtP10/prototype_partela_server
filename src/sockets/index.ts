@@ -90,6 +90,9 @@ function handleConnection(socket: Socket): void {
             // Enviar estado completo al nuevo comensal
             socket.emit(ServerEvents.TABLE_STATE, tableDTO);
 
+            // Confirmar identidad al cliente (evita ghosts locales)
+            socket.emit('table:join_success', { guestId: guest.id });
+
             // Notificar a otros comensales (solo si es nuevo o estaba offline)
             socket.to(tableId).emit(ServerEvents.TABLE_GUEST_JOINED, {
                 guest: tableService.guestToDTO(guest),

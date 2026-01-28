@@ -34,6 +34,7 @@ export interface PaymentInfo {
     idNumber: string;
     phoneCode: string;
     phoneNumber: string;
+    amount?: number; // Added for tracking custom amounts
 }
 
 // ─────────────────────────────────────────────────────────────
