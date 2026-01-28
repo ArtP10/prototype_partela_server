@@ -59,6 +59,7 @@ export interface Guest {
 
     // Timestamps
     joinedAt: Date;
+    isOnline?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -158,6 +159,7 @@ export interface GuestDTO {
     selectedItemIds: string[];
     paymentAmount: number;
     paymentStatus: PaymentStatus;
+    isOnline?: boolean;
 }
 
 export interface TableDTO {

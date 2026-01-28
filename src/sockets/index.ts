@@ -55,9 +55,9 @@ function handleConnection(socket: Socket): void {
     // TABLE EVENTS
     // ───────────────────────────────────────────────────────────
 
-    socket.on(ClientEvents.TABLE_JOIN, (data: { tableId: string }) => {
+    socket.on(ClientEvents.TABLE_JOIN, (data: { tableId: string, guestId?: string }) => {
         try {
-            const { tableId } = data;
+            const { tableId, guestId } = data;
 
             if (!tableId) {
                 socket.emit(ServerEvents.ERROR, {
@@ -67,8 +67,8 @@ function handleConnection(socket: Socket): void {
                 return;
             }
 
-            // Intentar unirse a la mesa
-            const guest = tableService.addGuestToTable(tableId, socket.id);
+            // Intentar unirse o reconectarse a la mesa
+            const guest = tableService.addGuestToTable(tableId, socket.id, guestId);
 
             if (!guest) {
                 socket.emit(ServerEvents.ERROR, {
@@ -90,7 +90,7 @@ function handleConnection(socket: Socket): void {
             // Enviar estado completo al nuevo comensal
             socket.emit(ServerEvents.TABLE_STATE, tableDTO);
 
-            // Notificar a otros comensales
+            // Notificar a otros comensales (solo si es nuevo o estaba offline)
             socket.to(tableId).emit(ServerEvents.TABLE_GUEST_JOINED, {
                 guest: tableService.guestToDTO(guest),
                 guestCount: table.guests.length
@@ -99,13 +99,29 @@ function handleConnection(socket: Socket): void {
             // Enviar estado actualizado a todos
             io.to(tableId).emit(ServerEvents.TABLE_STATE, tableDTO);
 
-            console.log(`[Socket] ${guest.displayName} joined table ${tableId}`);
+            console.log(`[Socket] ${guest.displayName} joined/reconnected table ${tableId}`);
         } catch (error) {
             console.error('[Socket] Error in TABLE_JOIN:', error);
             socket.emit(ServerEvents.ERROR, {
                 code: ErrorCodes.UNKNOWN_ERROR,
                 message: 'Error al unirse a la mesa'
             });
+        }
+    });
+
+    socket.on('table:reset', () => {
+        try {
+            const table = tableService.getTableBySocket(socket.id);
+            if (!table) return;
+
+            console.log(`[Socket] Reset requested for table ${table.id}`);
+            const resetTable = tableService.resetTable(table.id);
+
+            if (resetTable) {
+                io.to(table.id).emit(ServerEvents.TABLE_STATE, tableService.tableToDTO(resetTable));
+            }
+        } catch (error) {
+            console.error('[Socket] Error in TABLE_RESET:', error);
         }
     });
 
@@ -374,36 +390,29 @@ function handleConnection(socket: Socket): void {
 /**
  * Maneja la desconexión de un socket
  */
+/**
+ * Maneja la desconexión de un socket
+ */
 function handleDisconnect(socket: Socket): void {
-    const result = tableService.removeGuestFromTable(socket.id);
+    // Usar handleGuestDisconnect en lugar de removeGuestFromTable
+    const result = tableService.handleGuestDisconnect(socket.id);
 
     if (result) {
         const { table, guest } = result;
 
-        // Notificar a otros comensales
-        socket.to(table.id).emit(ServerEvents.TABLE_GUEST_LEFT, {
-            guestId: guest.id,
-            displayName: guest.displayName,
-            guestCount: table.guests.length
-        });
+        // Notificar a otros comensales (opcional, para UI "offline")
+        // No emitimos TABLE_GUEST_LEFT para que no desaparezca de la lista
 
-        // Enviar estado actualizado
+        // Enviar estado actualizado (para que se marque como offline si la UI lo soporta)
         const updatedTable = tableService.getTable(table.id);
-        if (updatedTable && updatedTable.guests.length > 0) {
-            io.to(table.id).emit(ServerEvents.TABLE_STATE, tableService.tableToDTO(updatedTable));
+        if (updatedTable) {
+            // Verificar si los que quedan online ya pagaron todos
+            // TODO: Importar lógica de verificación de pagos si se desea auto-completar
 
-            // Re-calcular votos si estaban votando
-            if (updatedTable.votingOpen) {
-                const votingStatus = voteService.getVotingStatus(table.id);
-                io.to(table.id).emit(ServerEvents.VOTE_UPDATED, {
-                    votes: votingStatus.results,
-                    totalVotes: votingStatus.totalVotes,
-                    totalGuests: votingStatus.totalGuests
-                });
-            }
+            io.to(table.id).emit(ServerEvents.TABLE_STATE, tableService.tableToDTO(updatedTable));
         }
 
-        console.log(`[Socket] ${guest.displayName} left table ${table.id}`);
+        console.log(`[Socket] ${guest.displayName} set to offline in table ${table.id}`);
     }
 
     console.log(`[Socket] Client disconnected: ${socket.id}`);

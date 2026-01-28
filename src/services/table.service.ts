@@ -116,25 +116,44 @@ export function getGuestBySocket(socketId: string): Guest | undefined {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Añade un nuevo comensal a una mesa
+ * Añade un nuevo comensal a una mesa o reconecta uno existente
  */
-export function addGuestToTable(tableId: string, socketId: string): Guest | null {
+export function addGuestToTable(tableId: string, socketId: string, existingGuestId?: string): Guest | null {
     const table = getOrCreateTable(tableId);
 
-    // Verificar si la mesa está llena
+    // 1. Intentar reconexión si se provee ID
+    if (existingGuestId) {
+        const existingGuest = table.guests.find(g => g.id === existingGuestId);
+        if (existingGuest) {
+            console.log(`[TableService] Guest ${existingGuest.displayName} reconnected to table ${tableId}`);
+
+            // Actualizar socket y estado online
+            existingGuest.socketId = socketId;
+            existingGuest.isOnline = true;
+
+            // Actualizar mappings
+            socketToTable.set(socketId, tableId);
+            socketToGuest.set(socketId, existingGuestId);
+
+            table.updatedAt = new Date();
+            return existingGuest;
+        }
+    }
+
+    // 2. Si no es reconexión, verificar cupo
     if (table.guests.length >= table.maxGuests) {
         console.log(`[TableService] Table ${tableId} is full`);
         return null;
     }
 
-    // Verificar si el socket ya está en una mesa
+    // Verificar si el socket ya está en una mesa (sanity check)
     if (socketToTable.has(socketId)) {
         console.log(`[TableService] Socket ${socketId} already in a table`);
         return null;
     }
 
-    // Crear el nuevo comensal
-    const guestIndex = table.guests.length;
+    // 3. Crear nuevo comensal
+    const guestIndex = table.guests.length; // TODO: Mejorar lógica de nombres si hay huecos
     const guest: Guest = {
         id: uuidv4(),
         socketId,
@@ -144,7 +163,8 @@ export function addGuestToTable(tableId: string, socketId: string): Guest | null
         selectedItemIds: [],
         paymentAmount: 0,
         paymentStatus: 'pending',
-        joinedAt: new Date()
+        joinedAt: new Date(),
+        isOnline: true
     };
 
     // Añadir a la mesa
@@ -157,8 +177,10 @@ export function addGuestToTable(tableId: string, socketId: string): Guest | null
     // Recalcular totales
     recalculateTableTotals(table);
 
-    // Inicializar remainingBalance
-    table.remainingBalance = table.total;
+    // Inicializar remainingBalance si es el primero
+    if (table.guests.length === 1) {
+        table.remainingBalance = table.total;
+    }
 
     table.updatedAt = new Date();
 
@@ -168,9 +190,9 @@ export function addGuestToTable(tableId: string, socketId: string): Guest | null
 }
 
 /**
- * Elimina un comensal de una mesa
+ * Maneja la desconexión de un socket (Soft Delete / Offline)
  */
-export function removeGuestFromTable(socketId: string): { table: Table; guest: Guest } | null {
+export function handleGuestDisconnect(socketId: string): { table: Table; guest: Guest } | null {
     const tableId = socketToTable.get(socketId);
     const guestId = socketToGuest.get(socketId);
 
@@ -179,41 +201,57 @@ export function removeGuestFromTable(socketId: string): { table: Table; guest: G
     const table = tables.get(tableId);
     if (!table) return null;
 
-    const guestIndex = table.guests.findIndex(g => g.id === guestId);
-    if (guestIndex === -1) return null;
+    const guest = table.guests.find(g => g.id === guestId);
+    if (!guest) return null;
 
-    const guest = table.guests[guestIndex];
+    // Marcar como desconectado pero NO eliminar
+    guest.isOnline = false;
 
-    // Eliminar comensal
-    table.guests.splice(guestIndex, 1);
-
-    // Limpiar mappings
+    // Limpiar mappings de socket (el usuario necesitará nuevo socket ID al volver)
     socketToTable.delete(socketId);
     socketToGuest.delete(socketId);
 
-    // Recalcular totales
-    recalculateTableTotals(table);
-
-    // Renombrar comensales restantes
-    table.guests.forEach((g, i) => {
-        g.displayName = generateGuestName(i);
-    });
-
-    table.updatedAt = new Date();
-
-    console.log(`[TableService] Guest ${guest.displayName} left table ${tableId}`);
-
-    // Si la mesa está vacía, eliminarla después de un tiempo
-    if (table.guests.length === 0) {
-        setTimeout(() => {
-            if (tables.get(tableId)?.guests.length === 0) {
-                tables.delete(tableId);
-                console.log(`[TableService] Empty table ${tableId} removed`);
-            }
-        }, 60000); // 1 minuto
-    }
+    console.log(`[TableService] Guest ${guest.displayName} disconnected (offline) from table ${tableId}`);
 
     return { table, guest };
+}
+
+/**
+ * Reinicia la mesa completamente
+ */
+export function resetTable(tableId: string): Table | null {
+    const table = tables.get(tableId);
+    if (!table) return null;
+
+    console.log(`[TableService] Resetting table ${tableId}`);
+
+    // Resetear estado general
+    table.tableStatus = 'viewing';
+    table.votingOpen = false;
+    table.votes = {
+        'pay_my_part': [],
+        'split_equally': [],
+        'custom_split': []
+    };
+    table.winningMode = null;
+    table.itemAssignments = {};
+    table.allItemsAssigned = false;
+
+    // Resetear guests (sin eliminarlos)
+    table.guests.forEach(g => {
+        g.votedPaymentMode = null;
+        g.selectedItemIds = [];
+        g.paymentAmount = 0;
+        g.paymentStatus = 'pending';
+        delete g.paymentDetails;
+    });
+
+    // Recalcular
+    recalculateTableTotals(table);
+    table.remainingBalance = table.total;
+    table.updatedAt = new Date();
+
+    return table;
 }
 
 /**
@@ -248,7 +286,8 @@ export function guestToDTO(guest: Guest): GuestDTO {
         votedPaymentMode: guest.votedPaymentMode,
         selectedItemIds: guest.selectedItemIds,
         paymentAmount: guest.paymentAmount,
-        paymentStatus: guest.paymentStatus
+        paymentStatus: guest.paymentStatus,
+        isOnline: guest.isOnline
     };
 }
 
